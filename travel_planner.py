@@ -11,7 +11,7 @@ load_dotenv()
 
 # Initialize Groq LLM
 llm = ChatGroq(
-    model="mixtral-8x7b-32768",
+    model="llama-3.3-70b-specdec",
     temperature=0.7,
     api_key=os.getenv("GROQ_API")
 )
@@ -77,7 +77,7 @@ class TravelAgent:
         response = await llm.ainvoke(template.format(**query))
         return response.content
 
-async def get_all_recommendations(query: dict):
+async def get_all_recommendations(hotel_query, transport_query, expense_query, tourist_query):
     agents = [
         TravelAgent("HotelAgent"),
         TravelAgent("TransportAgent"),
@@ -85,7 +85,13 @@ async def get_all_recommendations(query: dict):
         TravelAgent("TouristAgent")
     ]
     
-    tasks = [agent.get_recommendations(query) for agent in agents]
+    tasks = [
+        agents[0].get_recommendations(hotel_query),    # Hotel Agent
+        agents[1].get_recommendations(transport_query),  # Transport Agent
+        agents[2].get_recommendations(expense_query),   # Expense Agent
+        agents[3].get_recommendations(tourist_query)    # Tourist Agent
+    ]
+    
     return await asyncio.gather(*tasks)
 
 def main():
@@ -110,17 +116,34 @@ def main():
         transport_budget = budget * 0.3
         misc_budget = budget * 0.3
 
-        # Query parameters
-        query = {
+        # Query parameters for each agent
+        hotel_query = {
+            "destination": destination,
+            "num_people": num_people,
+            "budget": hotel_budget
+        }
+
+        transport_query = {
             "boarding": boarding,
             "destination": destination,
             "num_people": num_people,
-            "budget": budget
+            "budget": transport_budget
+        }
+
+        expense_query = {
+            "destination": destination,
+            "num_people": num_people,
+            "budget": misc_budget
+        }
+
+        tourist_query = {
+            "destination": destination,
+            "num_people": num_people
         }
 
         with st.spinner("Planning your perfect trip..."):
-            # Get recommendations
-            results = asyncio.run(get_all_recommendations(query))
+            # Get recommendations asynchronously
+            results = asyncio.run(get_all_recommendations(hotel_query, transport_query, expense_query, tourist_query))
 
             # Display results in tabs
             tabs = st.tabs(["🏨 Hotels", "🚌 Transport", "💰 Expenses", "🎯 Tourist Guide"])
@@ -138,7 +161,7 @@ def main():
             with tabs[2]:
                 st.header("Expense Breakdown")
                 st.info(f"Daily Budget: Rs. {misc_budget:,.2f}")
-                
+
                 # Display pie chart
                 fig = px.pie(
                     values=[hotel_budget, transport_budget, misc_budget],
