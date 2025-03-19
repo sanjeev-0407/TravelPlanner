@@ -127,7 +127,7 @@ def main():
         st.header("1. Select Database")
         index_name = st.selectbox(
             "Choose a database category",
-            ["hotels", "transport", "tourist_places", "expenses"]
+            ["hotels", "transport", "tourist-places", "expenses"]
         )
 
         if st.button("Create/Check Index"):
