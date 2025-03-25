@@ -10,9 +10,69 @@ from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
 from langchain_community.vectorstores import Pinecone as LangchainPinecone
 from embeddings import JinaEmbeddings
+# Add these imports for authentication
+import pymongo
+import bcrypt
+from pymongo import MongoClient
+import uuid
+from datetime import datetime, timedelta
 
 # Load environment variables
 load_dotenv()
+
+# MongoDB connection
+mongo_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+client = MongoClient(mongo_uri)
+db = client.travel_planner_db
+users_collection = db.users
+
+# User authentication functions
+def hash_password(password):
+    """Hash a password for storing."""
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+
+def verify_password(stored_password, provided_password):
+    """Verify a stored password against the provided password."""
+    return bcrypt.checkpw(provided_password.encode('utf-8'), stored_password)
+
+def create_user(username, password, role="user"):
+    """Create a new user in the database."""
+    # Check if user already exists
+    if users_collection.find_one({"username": username}):
+        return False, "Username already exists"
+    
+    # Create new user
+    user = {
+        "username": username,
+        "password": hash_password(password),
+        "role": role,
+        "created_at": datetime.now()
+    }
+    users_collection.insert_one(user)
+    return True, "User created successfully"
+
+def authenticate_user(username, password):
+    """Authenticate a user and return user info if successful."""
+    user = users_collection.find_one({"username": username})
+    if not user or not verify_password(user["password"], password):
+        return None
+    
+    # Return user without the password
+    user_info = {
+        "username": user["username"],
+        "role": user["role"],
+        "id": str(user["_id"])
+    }
+    return user_info
+
+def initialize_admin():
+    """Create admin user if it doesn't exist."""
+    admin_username = os.getenv("ADMIN_USERNAME", "admin")
+    admin_password = os.getenv("ADMIN_PASSWORD", "admin123")
+    
+    if not users_collection.find_one({"username": admin_username}):
+        create_user(admin_username, admin_password, role="admin")
+        print(f"Admin user '{admin_username}' created.")
 
 # App configuration
 st.set_page_config(
@@ -367,8 +427,163 @@ def get_all_recommendations(query: Dict[str, Any]) -> Dict[str, str]:
 
 # ===== User Interface Functions =====
 
+def login_ui():
+    """User login interface with enhanced styling."""
+    # Initialize session state for login
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
+        st.session_state.user_info = None
+    
+    # If already logged in, show logout option
+    if st.session_state.logged_in:
+        st.success(f"Logged in as {st.session_state.user_info['username']} ({st.session_state.user_info['role']})")
+        if st.button("Logout", type="primary"):
+            st.session_state.logged_in = False
+            st.session_state.user_info = None
+            st.rerun()
+        return True
+    
+    # Custom CSS for styling
+    st.markdown("""
+    <style>
+        .auth-container {
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            background-color: #f8f9fa;
+        }
+        .auth-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        .auth-header h1 {
+            color: #1e88e5;
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .auth-header p {
+            color: #666;
+            font-size: 1.1rem;
+        }
+        .stButton button {
+            width: 100%;
+        }
+        .divider {
+            display: flex;
+            align-items: center;
+            text-align: center;
+            margin: 1.5rem 0;
+        }
+        .divider::before, .divider::after {
+            content: '';
+            flex: 1;
+            border-bottom: 1px solid #ddd;
+        }
+        .divider span {
+            padding: 0 1rem;
+            color: #777;
+        }
+        .auth-footer {
+            text-align: center;
+            margin-top: 2rem;
+            font-size: 0.9rem;
+            color: #666;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Login container
+    st.markdown("""
+    <div class="auth-container">
+        <div class="auth-header">
+            <h1>🌴 Smart Travel Planner</h1>
+            <p>Sign in to start planning your perfect trip</p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Create login form
+    with st.form("login_form"):
+        username = st.text_input("Username", placeholder="Enter your username")
+        password = st.text_input("Password", type="password", placeholder="Enter your password")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.checkbox("Remember me")
+        with col2:
+            st.markdown('<div style="text-align: right;"><a href="#">Forgot password?</a></div>', unsafe_allow_html=True)
+        submit = st.form_submit_button("Sign In", type="primary", use_container_width=True)
+    
+    # Divider
+    st.markdown('<div class="divider"><span>OR</span></div>', unsafe_allow_html=True)
+    
+    # Signup section
+    st.markdown('<p style="text-align: center; margin-bottom: 1rem;">New to Smart Travel Planner?</p>', unsafe_allow_html=True)
+    
+    # Expand signup section with nice styling
+    with st.expander("Create New Account", expanded=False):
+        with st.form("signup_form"):
+            st.markdown('<h3 style="text-align: center; margin-bottom: 1rem;">Create Your Account</h3>', unsafe_allow_html=True)
+            
+            new_username = st.text_input("Username", placeholder="Choose a username")
+            new_password = st.text_input("Password", type="password", placeholder="Create a strong password")
+            confirm_password = st.text_input("Confirm Password", type="password", placeholder="Confirm your password")
+            
+            st.markdown("""
+            <div style="font-size: 0.8rem; color: #666; margin-bottom: 1rem;">
+                By creating an account, you agree to our <a href="#">Terms of Service</a> and <a href="#">Privacy Policy</a>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            signup_submit = st.form_submit_button("Create Account", type="primary", use_container_width=True)
+    
+    st.markdown("""
+    <div class="auth-footer">
+        © 2025 Smart Travel Planner. All rights reserved.
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Handle login
+    if submit:
+        if not username or not password:
+            st.error("Please enter both username and password")
+        else:
+            with st.spinner("Signing in..."):
+                user_info = authenticate_user(username, password)
+                if user_info:
+                    st.balloons()
+                    st.session_state.logged_in = True
+                    st.session_state.user_info = user_info
+                    st.success(f"Welcome back, {user_info['username']}!")
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password")
+    
+    # Handle signup
+    if signup_submit:
+        if not new_username or not new_password:
+            st.error("Please enter both username and password")
+        elif new_password != confirm_password:
+            st.error("Passwords do not match")
+        else:
+            with st.spinner("Creating your account..."):
+                success, message = create_user(new_username, new_password)
+                if success:
+                    st.success(message)
+                    st.info("Please sign in with your new account")
+                else:
+                    st.error(message)
+    
+    return False
+
 def db_manager_ui():
     """Database management user interface."""
+    # Verify user is admin
+    if "user_info" not in st.session_state or st.session_state.user_info["role"] != "admin":
+        st.error("You don't have permission to access this page")
+        return
+    
     st.header("🗄️ Travel Database Manager")
     
     # Initialize session state variables for form inputs if they don't exist
@@ -545,21 +760,30 @@ def planner_ui():
 
 def main():
     """Main application function."""
-    st.title("🌴 Smart Travel Planner")
+    # Initialize admin user
+    initialize_admin()
+    
+    # User login
+    if not login_ui():
+        return  # Stop execution if not logged in
     
     # Initialize app
     if not ensure_indexes_exist():
         st.error("Failed to initialize databases. Please check your configuration.")
         return
-        
-    # Create tabs for the main sections
-    tab1, tab2 = st.tabs(["Plan Your Trip", "Manage Database"])
     
-    with tab1:
-        planner_ui()
+    # Create tabs for the main sections based on user role
+    if st.session_state.user_info["role"] == "admin":
+        tab1, tab2 = st.tabs(["Plan Your Trip", "Manage Database"])
         
-    with tab2:
-        db_manager_ui()
+        with tab1:
+            planner_ui()
+            
+        with tab2:
+            db_manager_ui()
+    else:
+        # Regular users can only plan trips
+        planner_ui()
 
 if __name__ == "__main__":
     main()

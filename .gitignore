@@ -3,3 +3,4 @@
 /__pycache__/
 manage_db.py
 travel_planner.db
+*.pyc
